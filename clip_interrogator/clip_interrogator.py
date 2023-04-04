@@ -29,6 +29,10 @@ CACHE_URL_BASE = 'https://huggingface.co/pharma/ci-preprocess/resolve/main/'
 
 @dataclass 
 class Config:
+    def __init__(self, folder:str=None):
+        # Other attributes
+        # ...
+        self.folder = folder
     # models can optionally be passed in directly
     caption_model = None
     caption_processor = None
@@ -62,13 +66,13 @@ class Config:
         self.flavor_intermediate_count = 1024
 
 class Interrogator():
-    def __init__(self, config: Config, folder: str=None):
+    def __init__(self, config: Config):
         self.config = config
         self.device = config.device
         self.dtype = torch.float16 if self.device == 'cuda' else torch.float32
         self.caption_offloaded = True
         self.clip_offloaded = True        
-        self.folder = folder
+        self.folder = config.folder
         self.load_caption_model()
         self.load_clip_model()
 
