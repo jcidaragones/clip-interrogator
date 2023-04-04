@@ -61,12 +61,13 @@ class Config:
         self.flavor_intermediate_count = 1024
 
 class Interrogator():
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, folder: str=None):
         self.config = config
         self.device = config.device
         self.dtype = torch.float16 if self.device == 'cuda' else torch.float32
         self.caption_offloaded = True
-        self.clip_offloaded = True
+        self.clip_offloaded = True        
+        self.folder = folder
         self.load_caption_model()
         self.load_clip_model()
 
@@ -76,6 +77,11 @@ class Interrogator():
                 print(f"Loading caption model {self.config.caption_model_name}...")
 
             model_path = CAPTION_MODELS[self.config.caption_model_name]
+            if self.folder:
+                local_model_path = os.path.join(self.folder, self.config.caption_model_name)
+                if os.path.exists(local_model_path):
+                    model_path = local_model_path
+
             if self.config.caption_model_name.startswith('git-'):
                 caption_model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float32)
             elif self.config.caption_model_name.startswith('blip2-'):
@@ -91,6 +97,11 @@ class Interrogator():
         else:
             self.caption_model = self.config.caption_model
             self.caption_processor = self.config.caption_processor
+        
+        # Save the model to the local path after downloading it
+        if self.folder and model_path != local_model_path:
+            caption_model.save_pretrained(local_model_path)
+            self.caption_processor.save_pretrained(local_model_path)
 
     def load_clip_model(self):
         start_time = time.time()
@@ -101,6 +112,11 @@ class Interrogator():
         if config.clip_model is None:
             if not config.quiet:
                 print(f"Loading CLIP model {config.clip_model_name}...")
+
+            if self.folder:
+                local_model_path = os.path.join(self.folder, config.clip_model_name)
+                if os.path.exists(local_model_path):
+                    config.clip_model_path = local_model_path
 
             self.clip_model, _, self.clip_preprocess = open_clip.create_model_and_transforms(
                 clip_model_name, 
@@ -139,6 +155,11 @@ class Interrogator():
         end_time = time.time()
         if not config.quiet:
             print(f"Loaded CLIP model and data in {end_time-start_time:.2f} seconds.")
+
+        # Save the model to the local path after downloading it
+        if self.folder and config.clip_model_path != local_model_path:
+            self.clip_model.save_pretrained(local_model_path)
+            self.clip_preprocess.save_pretrained(local_model_path)
 
     def chain(
         self, 
