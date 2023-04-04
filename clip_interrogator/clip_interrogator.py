@@ -6,6 +6,7 @@ import os
 import requests
 import time
 import torch
+import pickle
 
 from dataclasses import dataclass
 from PIL import Image
@@ -109,28 +110,45 @@ class Interrogator():
 
         clip_model_name, clip_model_pretrained_name = config.clip_model_name.split('/', 2)
 
-        if config.clip_model is None:
-            if not config.quiet:
-                print(f"Loading CLIP model {config.clip_model_name}...")
+        clip_model_state_dict_path = os.path.join(config.folder, "clip_model_state_dict.pt")
+        clip_tokenizer_path = os.path.join(config.folder, "clip_tokenizer.pkl")
+        clip_preprocess_path = os.path.join(config.folder, "clip_preprocess.pkl")
 
-            if self.folder:
-                local_model_path = os.path.join(self.folder, config.clip_model_name)
-                if os.path.exists(local_model_path):
-                    config.clip_model_path = local_model_path
-
-            self.clip_model, _, self.clip_preprocess = open_clip.create_model_and_transforms(
-                clip_model_name, 
-                pretrained=clip_model_pretrained_name, 
-                precision='fp16' if config.device == 'cuda' else 'fp32',
-                device=config.device,
-                jit=False,
-                cache_dir=config.clip_model_path
-            )
-            self.clip_model.eval()
+        if os.path.exists(clip_model_state_dict_path) and os.path.exists(clip_tokenizer_path) and os.path.exists(clip_preprocess_path):
+            # Load the model state_dict
+            self.clip_model.load_state_dict(torch.load(clip_model_state_dict_path))
+            
+            # Load the tokenizer and preprocess transforms
+            with open(clip_tokenizer_path, "rb") as f:
+                self.tokenize = pickle.load(f)
+            with open(clip_preprocess_path, "rb") as f:
+                self.clip_preprocess = pickle.load(f)
         else:
-            self.clip_model = config.clip_model
-            self.clip_preprocess = config.clip_preprocess
-        self.tokenize = open_clip.get_tokenizer(clip_model_name)
+            if config.clip_model is None:
+                if not config.quiet:
+                    print(f"Loading CLIP model {config.clip_model_name}...")
+
+                self.clip_model, _, self.clip_preprocess = open_clip.create_model_and_transforms(
+                    clip_model_name, 
+                    pretrained=clip_model_pretrained_name, 
+                    precision='fp16' if config.device == 'cuda' else 'fp32',
+                    device=config.device,
+                    jit=False,
+                    cache_dir=config.clip_model_path
+                )
+                self.clip_model.eval()
+            else:
+                self.clip_model = config.clip_model
+                self.clip_preprocess = config.clip_preprocess
+            self.tokenize = open_clip.get_tokenizer(clip_model_name)
+
+            # Save the model to the local path after downloading it
+            torch.save(self.clip_model.state_dict(), os.path.join(config.folder, "clip_model_state_dict.pt"))
+            with open(os.path.join(config.folder, "clip_tokenizer.pkl"), "wb") as f:
+                pickle.dump(self.tokenize, f)
+
+            with open(os.path.join(config.folder, "clip_preprocess.pkl"), "wb") as f:
+                pickle.dump(self.clip_preprocess, f)
 
         sites = ['Artstation', 'behance', 'cg society', 'cgsociety', 'deviantart', 'dribble', 
                  'flickr', 'instagram', 'pexels', 'pinterest', 'pixabay', 'pixiv', 'polycount', 
@@ -156,10 +174,6 @@ class Interrogator():
         if not config.quiet:
             print(f"Loaded CLIP model and data in {end_time-start_time:.2f} seconds.")
 
-        # Save the model to the local path after downloading it
-        if self.folder and config.clip_model_path != local_model_path:
-            self.clip_model.save_pretrained(local_model_path)
-            self.clip_preprocess.save_pretrained(local_model_path)
 
     def chain(
         self, 
